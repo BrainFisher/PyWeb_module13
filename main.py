@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile, Response
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import create_engine, Column, Integer, String, Date, Boolean
 from sqlalchemy.orm import sessionmaker, Session, declarative_base
@@ -8,6 +8,8 @@ from datetime import date, datetime, timedelta
 from typing import List, Optional
 from jose import JWTError, jwt
 from dotenv import dotenv_values
+import cloudinary.uploader
+from fastapi.responses import JSONResponse
 
 # Визначення OAuth2 схеми
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -31,6 +33,8 @@ class User(Base):
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
     email_verified = Column(Boolean, default=False)
+    # Додали поле для зберігання URL аватара
+    avatar_url = Column(String, nullable=True)
 
 # Модель контакту
 
@@ -137,6 +141,48 @@ def get_current_user(token: str = Depends(get_token), db: Session = Depends(get_
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+
+# Конфігурація Cloudinary
+cloudinary.config(
+    cloud_name=env.get("CLOUDINARY_CLOUD_NAME"),
+    api_key=env.get("CLOUDINARY_API_KEY"),
+    api_secret=env.get("CLOUDINARY_API_SECRET")
+)
+
+# Маршрут для завантаження аватара
+
+
+@app.post("/upload-avatar/")
+async def upload_avatar(file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Завантаження зображення на Cloudinary
+    upload_result = cloudinary.uploader.upload(file.file)
+    # Отримання URL зображення
+    avatar_url = upload_result['secure_url']
+    # Збереження URL зображення для користувача
+    current_user.avatar_url = avatar_url
+    db.commit()
+    return {"avatar_url": avatar_url}
+
+# Обробник помилок для HTTPException
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"message": exc.detail}
+    )
+
+# Обробник помилок для невалідного JWT токена
+
+
+@app.exception_handler(JWTError)
+async def jwt_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=401,
+        content={"message": "Invalid authentication credentials"}
+    )
 
 # Ендпоінти API
 
