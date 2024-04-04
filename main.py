@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile, Response
+from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import create_engine, Column, Integer, String, Date, Boolean
 from sqlalchemy.orm import sessionmaker, Session, declarative_base
@@ -10,6 +10,10 @@ from jose import JWTError, jwt
 from dotenv import dotenv_values
 import cloudinary.uploader
 from fastapi.responses import JSONResponse
+from fastapi_limiter import Limiter
+from fastapi_limiter.depends import RateLimitExceeded
+from fastapi_limiter.depends import get_remote_address
+from starlette.requests import Request
 
 # Визначення OAuth2 схеми
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -149,6 +153,22 @@ cloudinary.config(
     api_key=env.get("CLOUDINARY_API_KEY"),
     api_secret=env.get("CLOUDINARY_API_SECRET")
 )
+
+# Ініціалізація обмежувача
+limiter = Limiter(key_func=get_remote_address)
+
+# Проміжний обробник для обмежень
+
+
+@app.middleware("http")
+async def add_limiter(request: Request, call_next):
+    try:
+        await limiter.consume(request=request)
+    except RateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=exc.status_code, detail=str(exc))
+    response = await call_next(request)
+    return response
 
 # Маршрут для завантаження аватара
 
